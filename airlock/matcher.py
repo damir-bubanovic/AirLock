@@ -22,7 +22,7 @@ def match_postcodes_to_grid(
             - postcode
             - easting
             - northing
-            - grid_id
+            - matched_grid_id
             - geometry (postcode point)
     """
 
@@ -54,6 +54,31 @@ def match_postcodes_to_grid(
     # Rename for clarity
     joined = joined.rename(columns={"grid_id": "matched_grid_id"})
 
-    return joined[
-        ["postcode", "easting", "northing", "matched_grid_id", "geometry"]
-    ]
+    return joined[["postcode", "easting", "northing", "matched_grid_id", "geometry"]]
+
+
+def summarize_matches(match_gdf: gpd.GeoDataFrame) -> dict:
+    """
+    Produce simple summary statistics for the postcode-to-grid mapping.
+
+    Returns:
+        {
+            "total_postcodes": int,
+            "matched": int,
+            "unmatched": int,
+            "match_rate": float (0–1),
+        }
+    """
+
+    total = len(match_gdf)
+    matched = match_gdf["matched_grid_id"].notna().sum()
+    unmatched = total - matched
+
+    match_rate = matched / total if total > 0 else 0.0
+
+    return {
+        "total_postcodes": int(total),
+        "matched": int(matched),
+        "unmatched": int(unmatched),
+        "match_rate": float(match_rate),
+    }
