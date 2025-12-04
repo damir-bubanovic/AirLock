@@ -22,13 +22,41 @@ from airlock.validation import (
     validate_postcode_coordinates,
 )
 
+# -------------------------------------------------------------------
+# Page config
+# -------------------------------------------------------------------
 st.set_page_config(
     page_title="AirLock – Postcode to Grid Matcher",
     layout="wide",
 )
 
-st.title("AirLock – UK Postcode to 1 km Grid Cell Matcher")
-st.write("Upload NOx grid data and ONSPD postcode data to generate matches.")
+# -------------------------------------------------------------------
+# Sidebar
+# -------------------------------------------------------------------
+st.sidebar.title("AirLock")
+st.sidebar.markdown(
+    "Air-quality Integrated Raster–Location Concordance\n\n"
+    "1. Upload NOx grid (DEFRA PCM)\n"
+    "2. Upload ONSPD postcode CSV\n"
+    "3. Run matching and download Excel."
+)
+
+st.sidebar.header("Upload data")
+nox_file = st.sidebar.file_uploader("NOx grid dataset (CSV)", type=["csv"])
+pc_file = st.sidebar.file_uploader("ONSPD postcode dataset (CSV)", type=["csv"])
+
+st.sidebar.markdown("---")
+st.sidebar.caption("All processing happens locally on this machine.")
+
+
+# -------------------------------------------------------------------
+# Main title
+# -------------------------------------------------------------------
+st.title("UK Postcode → 1 km NOx Grid Cell Matcher")
+st.write(
+    "This tool links UK postcodes (ONSPD) to 1 km grid cells from the "
+    "DEFRA NOx dataset using British National Grid (OSGB36) coordinates."
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -37,22 +65,11 @@ def cached_read_csv(uploaded_file):
     return pd.read_csv(uploaded_file)
 
 
-# -----------------------
-# File Upload Section
-# -----------------------
-
-st.header("1. Upload Data Files")
-
-nox_file = st.file_uploader("NOx grid dataset (CSV)", type=["csv"])
-pc_file = st.file_uploader("ONSPD postcode dataset (CSV)", type=["csv"])
-
-
-# -----------------------
+# -------------------------------------------------------------------
 # Data Loading and Processing
-# -----------------------
-
+# -------------------------------------------------------------------
 if nox_file and pc_file:
-    st.subheader("Loading datasets...")
+    st.header("Step 1 – Load and Validate Datasets")
 
     with st.spinner("Reading CSV files..."):
         try:
@@ -62,9 +79,7 @@ if nox_file and pc_file:
             st.error(f"Failed to read uploaded files: {e}")
             st.stop()
 
-    # -----------------------
     # Column validation
-    # -----------------------
     is_valid_nox, missing_nox = validate_nox_columns(nox_df.columns)
     if not is_valid_nox:
         st.error(f"NOx dataset is missing required columns: {missing_nox}")
@@ -75,34 +90,46 @@ if nox_file and pc_file:
         st.error(f"Postcode dataset is missing required columns: {missing_pc}")
         st.stop()
 
-    # -----------------------
     # Coordinate sanity checks (non-fatal warnings)
-    # -----------------------
     nox_coord_report = validate_nox_coordinates(nox_df)
     pc_coord_report = validate_postcode_coordinates(pc_df)
 
-    if nox_coord_report["invalid_coords"] > 0:
-        st.warning(
-            f"NOx dataset contains {nox_coord_report['invalid_coords']} rows "
-            f"with invalid OSGB36 coordinates. "
-            f"Examples (row indices): {nox_coord_report['invalid_examples']}"
+    cols_val = st.columns(2)
+    with cols_val[0]:
+        st.markdown("**NOx grid – coordinate quality**")
+        st.write(
+            f"Total rows: {nox_coord_report['total_rows']}  \n"
+            f"Valid coordinates: {nox_coord_report['valid_coords']}  \n"
+            f"Invalid coordinates: {nox_coord_report['invalid_coords']}"
         )
+        if nox_coord_report["invalid_coords"] > 0:
+            st.warning(
+                "NOx dataset contains invalid OSGB36 coordinates. "
+                f"Example row indices: {nox_coord_report['invalid_examples']}"
+            )
 
-    if pc_coord_report["invalid_coords"] > 0:
-        st.warning(
-            f"Postcode dataset contains {pc_coord_report['invalid_coords']} rows "
-            f"with invalid OSGB36 coordinates. "
-            f"Examples (row indices): {pc_coord_report['invalid_examples']}"
+    with cols_val[1]:
+        st.markdown("**Postcodes – coordinate quality**")
+        st.write(
+            f"Total rows: {pc_coord_report['total_rows']}  \n"
+            f"Valid coordinates: {pc_coord_report['valid_coords']}  \n"
+            f"Invalid coordinates: {pc_coord_report['invalid_coords']}"
         )
+        if pc_coord_report["invalid_coords"] > 0:
+            st.warning(
+                "Postcode dataset contains invalid OSGB36 coordinates. "
+                f"Example row indices: {pc_coord_report['invalid_examples']}"
+            )
 
     st.success("Files loaded and validated.")
 
-    # -----------------------
-    # Build grid polygons
-    # -----------------------
-    st.subheader("Building grid polygons...")
+    # -------------------------------------------------------------------
+    # Grid polygons
+    # -------------------------------------------------------------------
+    st.header("Step 2 – Build 1 km Grid Polygons")
+
     try:
-        with st.spinner("Generating 1 km grid polygons..."):
+        with st.spinner("Generating 1 km grid polygons from NOx centres..."):
             grid_gdf = build_grid_geodataframe(nox_df)
             grid_cells = gridcells_from_geodataframe(grid_gdf)
     except Exception as e:
@@ -111,10 +138,11 @@ if nox_file and pc_file:
 
     st.write(f"Loaded **{len(grid_cells)}** grid cells.")
 
-    # -----------------------
-    # Load postcodes
-    # -----------------------
-    st.subheader("Processing postcodes...")
+    # -------------------------------------------------------------------
+    # Postcode points
+    # -------------------------------------------------------------------
+    st.header("Step 3 – Process Postcodes")
+
     try:
         with st.spinner("Converting postcode coordinates to points..."):
             postcodes = load_postcodes_from_dataframe(pc_df)
@@ -124,10 +152,11 @@ if nox_file and pc_file:
 
     st.write(f"Loaded **{len(postcodes)}** cleaned postcode points.")
 
-    # -----------------------
-    # Run matcher
-    # -----------------------
-    st.subheader("Matching postcodes to grid cells...")
+    # -------------------------------------------------------------------
+    # Matching
+    # -------------------------------------------------------------------
+    st.header("Step 4 – Match Postcodes to Grid Cells")
+
     try:
         with st.spinner("Spatial matching in progress..."):
             match_gdf = match_postcodes_to_grid(postcodes, grid_cells)
@@ -147,21 +176,56 @@ if nox_file and pc_file:
     with col4:
         st.metric("Match rate", f"{summary['match_rate'] * 100:.2f}%")
 
-    # -----------------------
-    # Preview table
-    # -----------------------
-    st.subheader("Preview Match Results")
+    # -------------------------------------------------------------------
+    # Results tabs
+    # -------------------------------------------------------------------
+    st.header("Step 5 – Inspect Results")
 
-    tab1, tab2 = st.tabs(["Preview (first 20 rows)", "Full table"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Preview (first 20 rows)", "Full matched table", "Unmatched postcodes"]
+    )
+
     with tab1:
+        st.subheader("Preview – first 20 rows")
         st.dataframe(match_gdf.head(20))
+
     with tab2:
+        st.subheader("Full matched table")
         st.dataframe(match_gdf)
 
-    # -----------------------
-    # Export to Excel (download)
-    # -----------------------
-    st.subheader("Export Results")
+    with tab3:
+        st.subheader("Unmatched postcodes")
+        unmatched = match_gdf[match_gdf["matched_grid_id"].isna()].copy()
+
+        if unmatched.empty:
+            st.success("All postcodes were successfully matched to grid cells.")
+        else:
+            st.warning(
+                f"{len(unmatched)} postcodes could not be matched to any grid cell."
+            )
+            st.dataframe(unmatched.head(50))
+
+            # Allow download of unmatched-only list
+            unmatched_export = unmatched[["postcode", "easting", "northing"]].copy()
+            b_unmatched: Any = BytesIO()
+            unmatched_export.to_excel(b_unmatched, index=False, engine="openpyxl")
+            b_unmatched.seek(0)
+
+            st.download_button(
+                label="Download unmatched postcodes (Excel)",
+                data=b_unmatched,
+                file_name="airlock_unmatched_postcodes.xlsx",
+                mime=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet"
+                ),
+            )
+
+    # -------------------------------------------------------------------
+    # Export matched results
+    # -------------------------------------------------------------------
+    st.header("Step 6 – Export Matched Results")
+
     export_df = prepare_export_table(match_gdf)
 
     buffer: Any = BytesIO()
@@ -169,11 +233,17 @@ if nox_file and pc_file:
     buffer.seek(0)
 
     st.download_button(
-        label="Download Excel",
+        label="Download matched grid–postcode table (Excel)",
         data=buffer,
-        file_name="airlock_output.xlsx",
+        file_name="airlock_matched_grid_postcodes.xlsx",
         mime=(
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
         ),
     )
+
+    st.caption("Exported table lists each postcode and its associated grid cell.")
+
+
+else:
+    st.info("Use the sidebar to upload both NOx grid and ONSPD postcode CSV files to begin.")
