@@ -15,7 +15,12 @@ from airlock.grid_builder import build_grid_geodataframe, gridcells_from_geodata
 from airlock.postcode_loader import load_postcodes_from_dataframe
 from airlock.matcher import match_postcodes_to_grid, summarize_matches
 from airlock.exporters import prepare_export_table
-
+from airlock.validation import (
+    validate_nox_columns,
+    validate_postcode_columns,
+    validate_nox_coordinates,
+    validate_postcode_coordinates,
+)
 
 st.set_page_config(
     page_title="AirLock – Postcode to Grid Matcher",
@@ -57,7 +62,40 @@ if nox_file and pc_file:
             st.error(f"Failed to read uploaded files: {e}")
             st.stop()
 
-    st.success("Files loaded successfully.")
+    # -----------------------
+    # Column validation
+    # -----------------------
+    is_valid_nox, missing_nox = validate_nox_columns(nox_df.columns)
+    if not is_valid_nox:
+        st.error(f"NOx dataset is missing required columns: {missing_nox}")
+        st.stop()
+
+    is_valid_pc, missing_pc = validate_postcode_columns(pc_df.columns)
+    if not is_valid_pc:
+        st.error(f"Postcode dataset is missing required columns: {missing_pc}")
+        st.stop()
+
+    # -----------------------
+    # Coordinate sanity checks (non-fatal warnings)
+    # -----------------------
+    nox_coord_report = validate_nox_coordinates(nox_df)
+    pc_coord_report = validate_postcode_coordinates(pc_df)
+
+    if nox_coord_report["invalid_coords"] > 0:
+        st.warning(
+            f"NOx dataset contains {nox_coord_report['invalid_coords']} rows "
+            f"with invalid OSGB36 coordinates. "
+            f"Examples (row indices): {nox_coord_report['invalid_examples']}"
+        )
+
+    if pc_coord_report["invalid_coords"] > 0:
+        st.warning(
+            f"Postcode dataset contains {pc_coord_report['invalid_coords']} rows "
+            f"with invalid OSGB36 coordinates. "
+            f"Examples (row indices): {pc_coord_report['invalid_examples']}"
+        )
+
+    st.success("Files loaded and validated.")
 
     # -----------------------
     # Build grid polygons
@@ -126,7 +164,6 @@ if nox_file and pc_file:
     st.subheader("Export Results")
     export_df = prepare_export_table(match_gdf)
 
-    # Use Any to satisfy the type checker while still using BytesIO
     buffer: Any = BytesIO()
     export_df.to_excel(buffer, index=False, engine="openpyxl")
     buffer.seek(0)
