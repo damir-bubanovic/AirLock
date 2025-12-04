@@ -4,18 +4,29 @@ import pandas as pd
 from shapely.geometry import Point
 
 from .models import PostcodePoint
-
 from .validation import validate_postcode_columns
+from .filters import filter_postcodes_basic
 
 
-def load_postcodes_from_dataframe(df: pd.DataFrame) -> List[PostcodePoint]:
+def load_postcodes_from_dataframe(
+    df: pd.DataFrame,
+    apply_basic_filters: bool = True,
+) -> List[PostcodePoint]:
     """
     Convert a postcode DataFrame (from ONSPD) into a list of PostcodePoint models.
 
     Required columns:
         - pcd      : postcode
-        - oseast1m : easting (OSGB36)
-        - osnrth1m : northing (OSGB36)
+        - oseast1m : easting
+        - osnrth1m : northing
+
+    Optional:
+        - doterm (used by filters)
+
+    Args:
+        df: Raw postcode DataFrame.
+        apply_basic_filters: If True, clean the DataFrame (drop missing coords,
+                             drop duplicates, keep only active codes).
 
     Returns:
         List[PostcodePoint]
@@ -26,6 +37,10 @@ def load_postcodes_from_dataframe(df: pd.DataFrame) -> List[PostcodePoint]:
     if not is_valid:
         raise ValueError(f"Postcode dataset missing required columns: {missing}")
 
+    # Apply filters (remove missing coords, duplicates, terminated, etc.)
+    if apply_basic_filters:
+        df = filter_postcodes_basic(df)
+
     points: List[PostcodePoint] = []
 
     for _, row in df.iterrows():
@@ -33,7 +48,7 @@ def load_postcodes_from_dataframe(df: pd.DataFrame) -> List[PostcodePoint]:
         e = row["oseast1m"]
         n = row["osnrth1m"]
 
-        # Skip non-geographic or missing coordinates
+        # Safety check in case filters were disabled or incomplete
         if pd.isna(e) or pd.isna(n):
             continue
 

@@ -12,7 +12,7 @@ def test_load_postcodes_from_dataframe():
         "osnrth1m": [800000],
     })
 
-    points = load_postcodes_from_dataframe(df)
+    points = load_postcodes_from_dataframe(df, apply_basic_filters=False)
 
     assert len(points) == 1
 
@@ -24,3 +24,21 @@ def test_load_postcodes_from_dataframe():
     assert isinstance(p.geometry, Point)
     assert p.geometry.x == 395000
     assert p.geometry.y == 800000
+
+
+def test_loader_with_filters():
+    df = pd.DataFrame({
+        "pcd": ["PC1", "PC2", "PC3"],
+        "oseast1m": [100, None, 300],
+        "osnrth1m": [100, 200, None],
+        "doterm": [None, None, "202001"],  # PC3 is terminated
+    })
+
+    points = load_postcodes_from_dataframe(df, apply_basic_filters=True)
+
+    # Only PC1 survives: PC2 missing coords, PC3 terminated
+    assert len(points) == 1
+    p = points[0]
+    assert p.postcode == "PC1"
+    assert p.easting == 100
+    assert p.northing == 100
