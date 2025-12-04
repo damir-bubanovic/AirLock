@@ -48,8 +48,16 @@ def match_postcodes_to_grid(
         crs=CRS_OSGB36,
     )
 
+    # Trigger spatial index creation for faster joins on large datasets
+    _ = grid_gdf.sindex
+
     # Spatial join: which polygon contains each postcode point
-    joined = gpd.sjoin(pc_gdf, grid_gdf, how="left", predicate="within")
+    joined = gpd.sjoin(
+        pc_gdf,
+        grid_gdf,
+        how="left",
+        predicate="within",
+    )
 
     # Rename for clarity
     joined = joined.rename(columns={"grid_id": "matched_grid_id"})
