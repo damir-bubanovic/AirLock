@@ -2,6 +2,11 @@
 
 AirLock links UK postcodes to 1 km NOx grid cells. It relies on two main datasets:
 
+1. DEFRA NOx 1 km grid data  
+2. ONS Postcode Directory (ONSPD)
+
+Both datasets must use **British National Grid (OSGB36 / EPSG:27700)** with coordinates in metres.
+
 ---
 
 ## 1. DEFRA NOx 1 km Grid Data
@@ -10,21 +15,25 @@ AirLock links UK postcodes to 1 km NOx grid cells. It relies on two main dataset
 - **Link:** https://uk-air.defra.gov.uk/data/pcm-data#nox  
 - **Coordinate system:** British National Grid (OSGB36), 1 km × 1 km cells  
 - **Geometry representation:**  
-  - Grid cell centres given as Eastings (X) and Northings (Y) in metres  
+  - Grid cell centres given as Eastings (`X`) and Northings (`Y`) in metres  
   - Each row represents one 1 km grid cell
 
-### Expected key fields (NOx grid)
+### 1.1 Expected key fields (NOx grid)
 
-These names may vary slightly depending on the file/year; AirLock will allow mapping or configuration if needed:
+These names may vary slightly depending on the file/year; AirLock assumes the following columns exist (or are mapped to them):
 
 - `X` – easting (metres), centre of 1 km cell  
 - `Y` – northing (metres), centre of 1 km cell  
+
+Optional but commonly present:
+
 - `GridCode` – grid identifier (not an official OS grid reference)  
 - Pollutant fields (example for NOx):  
-  - `NOx` or `nox_annual_mean` (main value of interest)  
-  - Additional columns may include year, source contributions, etc.
+  - `NOx` or `NOx_YYYY` (annual mean concentrations)  
+  - Additional columns may include year, sector breakdowns, etc.
 
-The application uses `X` and `Y` to construct 1 km grid cell polygons in OSGB36.
+AirLock uses `X` and `Y` to construct 1 km grid cell polygons in OSGB36.  
+Any extra columns are preserved in intermediate data but are not required for postcode matching.
 
 ---
 
@@ -35,40 +44,38 @@ The application uses `X` and `Y` to construct 1 km grid cell polygons in OSGB36.
 - **Coverage:** All current and some terminated UK postcodes  
 - **Coordinate system:**  
   - Eastings (`oseast1m`) and Northings (`osnrth1m`) in OSGB36 (1 m resolution)  
-  - Latitude/longitude in WGS84 are also often included
+  - Latitude/longitude in WGS84 are also often included, but not used by AirLock
 
-### Expected key fields (ONSPD)
+### 2.1 Typical ONSPD fields
 
 Field names may vary slightly by release; typical ONSPD structure includes:
 
 - `pcd` – full postcode (often without space)  
 - `pcd2` – formatted postcode (with standard spacing)  
-- `pcd3` – truncated version (sometimes used for grouping)  
+- `pcd3` – truncated version (for grouping)  
 - `oseast1m` – easting (metres, OSGB36)  
 - `osnrth1m` – northing (metres, OSGB36)  
-- `lat` – latitude (WGS84, optional for our purposes)  
-- `long` – longitude (WGS84, optional for our purposes)  
-- `oseast1m` / `osnrth1m` may be blank for some special or non-geographic codes
-
-Additional fields (not strictly required for AirLock but may be useful filters):
-
-- `dointr` / `doterm` – date of introduction / termination  
-- `usertype` or similar – indicator of large user / small user  
-- Region, local authority, health area codes, etc.
+- `lat` – latitude (WGS84)  
+- `long` – longitude (WGS84)  
+- `doterm` – termination date (if postcode is no longer active)  
+- Various geographic and administrative codes (LSOA, MSOA, LAD, NHS, region, etc.)
 
 AirLock primarily uses:
 
-- Postcode ID (`pcd` or `pcd2`)  
-- Easting and northing (`oseast1m`, `osnrth1m`)  
-- Optional status or termination flags for filtering.
+- Postcode ID: `pcd`  
+- Easting: `oseast1m`  
+- Northing: `osnrth1m`  
+- Optional termination information: `doterm` (for filtering)
+
+Other fields may be present but are ignored by the core matching engine.
 
 ---
 
-## File Location in the Project
+## 3. Required Columns Summary (AirLock Internal Schema Requirements)
 
-During development, datasets are expected to be placed (manually) in:
+AirLock enforces a minimal schema to ensure it can process data robustly.  
+Internally these requirements are expressed as:
 
-- `data/ons/` – ONSPD files (raw CSV or unzipped contents)  
-- `data/defra_nox/` – DEFRA NOx grid files
-
-AirLock will not commit these datasets to the repository; they are large and often subject to licensing terms. The application will instead allow the user to select or upload the relevant files at runtime.
+```python
+NOX_REQUIRED_COLUMNS = ["X", "Y"]
+POSTCODE_REQUIRED_COLUMNS = ["pcd", "oseast1m", "osnrth1m"]
