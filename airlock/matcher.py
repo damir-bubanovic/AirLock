@@ -1,9 +1,14 @@
 from typing import List
 
 import geopandas as gpd
+import pandas as pd
 
 from .models import GridCell, PostcodePoint
 from .config import CRS_OSGB36
+
+
+# Number of postcodes processed per spatial join batch
+CHUNK_SIZE = 100_000
 
 
 def match_postcodes_to_grid(
@@ -12,6 +17,10 @@ def match_postcodes_to_grid(
 ) -> gpd.GeoDataFrame:
     """
     Match each postcode to the grid cell polygon that contains it.
+
+    This implementation is chunked to better handle large postcode datasets.
+    It processes the postcode list in batches of CHUNK_SIZE, performing a
+    spatial join per chunk and concatenating the results.
 
     Args:
         postcodes: List of PostcodePoint models.
@@ -26,18 +35,20 @@ def match_postcodes_to_grid(
             - geometry (postcode point)
     """
 
-    # Build GeoDataFrame for postcodes
-    pc_gdf = gpd.GeoDataFrame(
-        {
-            "postcode": [p.postcode for p in postcodes],
-            "easting": [p.easting for p in postcodes],
-            "northing": [p.northing for p in postcodes],
-            "geometry": [p.geometry for p in postcodes],
-        },
-        crs=CRS_OSGB36,
-    )
+    # Edge case: no postcodes
+    if not postcodes:
+        return gpd.GeoDataFrame(
+            {
+                "postcode": [],
+                "easting": [],
+                "northing": [],
+                "matched_grid_id": [],
+                "geometry": [],
+            },
+            crs=CRS_OSGB36,
+        )
 
-    # Build GeoDataFrame for grid cells
+    # Build GeoDataFrame for grid cells once
     grid_gdf = gpd.GeoDataFrame(
         {
             "grid_id": [c.id for c in gridcells],
@@ -48,21 +59,46 @@ def match_postcodes_to_grid(
         crs=CRS_OSGB36,
     )
 
-    # Trigger spatial index creation for faster joins on large datasets
+    # Trigger spatial index creation once for efficiency
     _ = grid_gdf.sindex
 
-    # Spatial join: which polygon contains each postcode point
-    joined = gpd.sjoin(
-        pc_gdf,
-        grid_gdf,
-        how="left",
-        predicate="within",
-    )
+    chunk_results: List[gpd.GeoDataFrame] = []
 
-    # Rename for clarity
-    joined = joined.rename(columns={"grid_id": "matched_grid_id"})
+    n = len(postcodes)
+    for start in range(0, n, CHUNK_SIZE):
+        end = min(start + CHUNK_SIZE, n)
+        chunk = postcodes[start:end]
 
-    return joined[["postcode", "easting", "northing", "matched_grid_id", "geometry"]]
+        pc_gdf = gpd.GeoDataFrame(
+            {
+                "postcode": [p.postcode for p in chunk],
+                "easting": [p.easting for p in chunk],
+                "northing": [p.northing for p in chunk],
+                "geometry": [p.geometry for p in chunk],
+            },
+            crs=CRS_OSGB36,
+        )
+
+        joined_chunk = gpd.sjoin(
+            pc_gdf,
+            grid_gdf,
+            how="left",
+            predicate="within",
+        )
+
+        joined_chunk = joined_chunk.rename(columns={"grid_id": "matched_grid_id"})
+
+        joined_chunk = joined_chunk[
+            ["postcode", "easting", "northing", "matched_grid_id", "geometry"]
+        ]
+
+        chunk_results.append(joined_chunk)
+
+    # Concatenate all chunks into a single GeoDataFrame
+    result_df = pd.concat(chunk_results, ignore_index=True)
+    result = gpd.GeoDataFrame(result_df, crs=CRS_OSGB36)
+
+    return result
 
 
 def summarize_matches(match_gdf: gpd.GeoDataFrame) -> dict:
