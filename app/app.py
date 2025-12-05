@@ -21,6 +21,7 @@ from airlock.validation import (
     validate_nox_coordinates,
     validate_postcode_coordinates,
 )
+from airlock.methods_summary import generate_methods_summary
 
 # -------------------------------------------------------------------
 # Page config
@@ -38,7 +39,7 @@ st.sidebar.markdown(
     "Air-quality Integrated Raster–Location Concordance\n\n"
     "1. Upload NOx grid (DEFRA PCM)\n"
     "2. Upload ONSPD postcode CSV\n"
-    "3. Run matching and download Excel."
+    "3. Run matching and download outputs."
 )
 
 st.sidebar.header("Upload data")
@@ -244,6 +245,26 @@ if nox_file and pc_file:
 
     st.caption("Exported table lists each postcode and its associated grid cell.")
 
+    # -------------------------------------------------------------------
+    # Methods Summary download
+    # -------------------------------------------------------------------
+    st.header("Step 7 – Export Methods Summary")
+
+    methods_text = generate_methods_summary(
+        nox_rows=len(grid_cells),
+        postcode_rows=len(postcodes),
+        matched_rows=summary["matched"],
+        unmatched_rows=summary["unmatched"],
+        match_rate=summary["match_rate"],
+    )
+    methods_bytes = methods_text.encode("utf-8")
+
+    st.download_button(
+        label="Download Methods Summary (.txt)",
+        data=methods_bytes,
+        file_name="airlock_methods_summary.txt",
+        mime="text/plain",
+    )
 
 else:
     st.info("Use the sidebar to upload both NOx grid and ONSPD postcode CSV files to begin.")
